@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>BTC 5M US SESSION TERMINAL</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body{
+margin:0;
+font-family:Inter, monospace;
+background:#0a0f1c;
+color:#e6faff;
+overflow-x:hidden;
+}
+
+.container{padding:40px}
+
+.tabs{margin:20px 0}
+
+.tab{
+display:inline-block;
+margin-right:10px;
+padding:8px 16px;
+border-radius:20px;
+background:rgba(255,255,255,0.08);
+cursor:pointer;
+transition:0.2s;
+}
+
+.tab.active{
+background:linear-gradient(45deg,#00ffff,#ff00ff);
+color:black;
+}
+
+.grid{
+display:grid;
+grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+gap:25px;
+margin-top:20px;
+}
+
+.card{
+background:rgba(255,255,255,0.05);
+backdrop-filter:blur(20px);
+border-radius:16px;
+padding:20px;
+border:1px solid rgba(255,255,255,0.1);
+box-shadow:0 0 30px rgba(0,255,255,0.08);
+transition:0.3s;
+}
+
+.card:hover{
+transform:translateY(-5px);
+box-shadow:0 0 40px rgba(0,255,255,0.25);
+}
+
+canvas{
+background:transparent;
+cursor:pointer;
+}
+
+/* modal */
+#modal{
+display:none;
+position:fixed;
+top:0;
+left:0;
+width:100%;
+height:100%;
+background:rgba(0,0,0,0.8);
+justify-content:center;
+align-items:center;
+z-index:9999;
+}
+
+#modalContent{
+width:85%;
+height:85%;
+background:#111827;
+border-radius:20px;
+padding:20px;
+box-shadow:0 0 60px #00ffff44;
+display:flex;
+justify-content:center;
+align-items:center;
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+<h2>BTC 5M US SESSION TERMINAL</h2>
+
+<input type="file" id="fileInput" accept=".csv">
+
+<div id="tabs" class="tabs"></div>
+
+<div class="grid">
+<div class="card" id="stats"></div>
+
+<div class="card">
+<b>Impulse Curve</b>
+<canvas id="impulseChart"></canvas>
+</div>
+
+<div class="card">
+<b>5m Returns</b>
+<canvas id="returnsChart"></canvas>
+</div>
+
+<div class="card">
+<b>Direction Split</b>
+<canvas id="directionChart"></canvas>
+</div>
+
+<div class="card">
+<b>Strategy Winrate Comparison</b>
+<canvas id="comparisonChart"></canvas>
+</div>
+</div>
+</div>
+
+<div id="modal">
+<div id="modalContent"></div>
+</div>
+
+<script>
+
+let groupedData={}
+let charts={}
+let currentCanvas=null
+let originalParent=null
+
+document.getElementById("fileInput").addEventListener("change",e=>{
+const reader=new FileReader()
+reader.onload=ev=>parseCSV(ev.target.result)
+reader.readAsText(e.target.files[0])
+})
+
+function parseCSV(text){
+const rows=text.trim().split("\n").slice(1)
+
+groupedData={}
+rows.forEach(r=>{
+const c=r.split(",")
+if(c.length<4) return
+const type=c[0]
+const ret=parseFloat(c[1])
+if(!groupedData[type]) groupedData[type]=[]
+groupedData[type].push(ret)
+})
+
+createTabs()
+renderComparison()
+
+const firstKey=Object.keys(groupedData)[0]
+if(firstKey) selectTab(firstKey)
+}
+
+function createTabs(){
+const container=document.getElementById("tabs")
+container.innerHTML=""
+Object.keys(groupedData).forEach(type=>{
+const btn=document.createElement("div")
+btn.className="tab"
+btn.innerText=type
+btn.onclick=()=>selectTab(type)
+container.appendChild(btn)
+})
+}
+
+function selectTab(type){
+document.querySelectorAll(".tab").forEach(t=>{
+t.classList.remove("active")
+if(t.innerText===type) t.classList.add("active")
+})
+renderStrategy(type)
+}
+
+function renderStrategy(type){
+const data=groupedData[type]
+if(!data) return
+
+const n=data.length
+const wins=data.filter(x=>x>0).length
+const winrate=wins/n
+
+document.getElementById("stats").innerHTML=
+"<b>"+type+"</b><br>"+
+"Events: "+n+"<br>"+
+"Winrate: "+(winrate*100).toFixed(2)+"%"
+
+renderImpulse(data)
+renderReturns(data)
+renderDirection(wins,n)
+}
+
+function renderImpulse(data){
+if(charts.impulse) charts.impulse.destroy()
+
+let cumulative=0
+let series=[]
+data.forEach(x=>{
+cumulative+=x>0?1:-1
+series.push(cumulative)
+})
+
+charts.impulse=new Chart(
+document.getElementById("impulseChart"),
+{
+type:"line",
+data:{labels:series.map((_,i)=>i),datasets:[{data:series,borderColor:"#00ffff"}]},
+options:{plugins:{legend:{display:false}},scales:{x:{display:false},y:{display:false}}}
+})
+}
+
+function renderReturns(data){
+if(charts.returns) charts.returns.destroy()
+
+charts.returns=new Chart(
+document.getElementById("returnsChart"),
+{
+type:"bar",
+data:{
+labels:data.map((_,i)=>i),
+datasets:[{data:data.map(x=>x*100),
+backgroundColor:data.map(x=>x>0?"#00ffff":"#ff00ff")}]
+},
+options:{plugins:{legend:{display:false}},scales:{x:{display:false},y:{display:false}}}
+})
+}
+
+function renderDirection(wins,n){
+if(charts.direction) charts.direction.destroy()
+
+charts.direction=new Chart(
+document.getElementById("directionChart"),
+{
+type:"doughnut",
+data:{
+labels:["Up","Down"],
+datasets:[{data:[wins,n-wins],
+backgroundColor:["#00ffff","#ff00ff"]}]
+},
+options:{plugins:{legend:{display:false}}}
+})
+}
+
+function renderComparison(){
+if(charts.comparison) charts.comparison.destroy()
+
+let labels=[]
+let values=[]
+
+Object.keys(groupedData).forEach(type=>{
+const data=groupedData[type]
+const winrate=data.filter(x=>x>0).length/data.length
+labels.push(type)
+values.push(winrate*100)
+})
+
+charts.comparison=new Chart(
+document.getElementById("comparisonChart"),
+{
+type:"bar",
+data:{labels:labels,datasets:[{data:values,backgroundColor:"#00ffff"}]},
+options:{plugins:{legend:{display:false}},scales:{y:{min:40,max:60}}}
+})
+}
+
+/* FULLSCREEN LOGIC */
+
+document.querySelectorAll("canvas").forEach(canvas=>{
+canvas.addEventListener("click",()=>openFullscreen(canvas))
+})
+
+function openFullscreen(canvas){
+currentCanvas=canvas
+originalParent=canvas.parentElement
+document.getElementById("modalContent").appendChild(canvas)
+document.getElementById("modal").style.display="flex"
+resizeChart(canvas)
+}
+
+function closeFullscreen(){
+if(!currentCanvas) return
+originalParent.appendChild(currentCanvas)
+document.getElementById("modal").style.display="none"
+resizeChart(currentCanvas)
+currentCanvas=null
+}
+
+document.getElementById("modal").addEventListener("click",closeFullscreen)
+document.addEventListener("keydown",e=>{
+if(e.key==="Escape") closeFullscreen()
+})
+
+function resizeChart(canvas){
+for(let key in charts){
+if(charts[key] && charts[key].canvas===canvas){
+charts[key].resize()
+}
+}
+}
+
+</script>
+
+</body>
+</html>
